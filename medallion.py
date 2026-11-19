@@ -75,22 +75,17 @@ def get_market_regime():
 def ai_score(rsi, vs_sma, residual, vr, regime):
     score = 50
     reasons = []
-    # 1. Quant core - dislocation strength (most important)
     if residual < -4: score += 25; reasons.append("Huge dislocation")
     elif residual < -2.5: score += 18; reasons.append("Strong dislocation")
     elif residual < -1.5: score += 10; reasons.append("Dislocation")
-    # 2. RSI
     if rsi < 20: score += 15; reasons.append("Extremely oversold")
     elif rsi < 30: score += 10; reasons.append("Oversold")
     elif rsi < 35: score += 5
-    # 3. vs SMA (daily discount)
     if vs_sma < -12: score += 10; reasons.append("Deep discount")
     elif vs_sma < -8: score += 6
-    # 4. Volume
     if vr > 2: score += 8; reasons.append("Panic vol 2x")
     elif vr > 1.5: score += 5
     elif vr < 0.7: score -= 8; reasons.append("Low vol")
-    # 5. Market regime filter
     if "BEARISH" in regime: score -= 12; reasons.append("Market bearish")
     elif "BULLISH" in regime: score += 5
     return max(0, min(100, score)), ", ".join(reasons)
@@ -162,7 +157,6 @@ def scan_once():
                 prices[t] = last
                 bar_ret = (last/prev-1)*100
                 r = float(calc_rsi(close).iloc[-1])
-                # daily context for vs SMA
                 sma20_15 = float(close.rolling(20).mean().iloc[-1])
                 vs_sma = (last - sma20_15)/sma20_15*100
                 vol = float(h['Volume'].iloc[-1]); avg_vol = float(h['Volume'].rolling(20).mean().iloc[-1])
@@ -175,7 +169,6 @@ def scan_once():
         send_telegram("⚠️ Medallion Final: no data this cycle, retry 5m")
         return
 
-    # Close old paper trades
     still_open, closed_rows = [], []
     for s in open_signals:
         p_now = prices.get(s["t"])
@@ -190,7 +183,6 @@ def scan_once():
         ledger = pd.concat([ledger, pd.DataFrame(closed_rows)], ignore_index=True)
         save_ledger(ledger)
 
-    # Quant Core: residual vs market median
     rets = np.array([c["bar"] for c in candidates])
     market = float(np.median(rets))
     spread = float(np.std(rets)) or 1.0
@@ -202,10 +194,8 @@ def scan_once():
         cool = last_alerted.get(c["t"])
         if cool and (now - cool).total_seconds() < COOLDOWN_MIN*60:
             continue
-        # COMBINED FILTER: dislocation + oversold + discount
         if residual < -1.5*spread and c["rsi"] < 35:
             sc, rsn = ai_score(c["rsi"], c["vs"], residual, c["vr"], regime)
-            # Only keep if score decent - this is the AI filter
             if sc >= 55:
                 c["score"] = sc; c["reason"] = rsn; c["ts"] = now
                 buys.append(c)
@@ -214,7 +204,7 @@ def scan_once():
         last_alerted[b["t"]] = now
     open_signals += [{"t":b["t"],"p":b["p"],"ts":b["ts"]} for b in buys]
 
-    # Message
+    # Message with Bamboo + Chaka links
     msg = f"🤖 MEDALLION 300 FINAL - AI QUANT\nMarket: {regime} ({regime_pct:+.2f}%) | Median 15m: {market:+.2f}% | Spread: {spread:.2f}%\n\n"
     if "BEARISH" in regime:
         msg += "⚠️ AI: Market bearish — only STRONG 💎, small size, tight stop.\n\n"
@@ -226,7 +216,12 @@ def scan_once():
         for b in buys:
             flag = "🇳🇬" if ".LG" in b["t"] else "🇺🇸"
             strength = "STRONG 💎" if b["score"]>=75 else "WATCH 👀" if b["score"]>=65 else "RISKY ⚠️"
-            msg += f"{flag} {b['t']} ${b['p']:.2f} RSI {b['rsi']:.0f} Res {b['res']:+.2f}% Score {b['score']:.0f}% {strength}\n  👉 {b['reason']} | Vol {b['vr']:.1f}x vs SMA {b['vs']:.1f}%\n"
+            clean_t = b["t"].replace(".LG","")
+            tp = b["p"] * 1.10
+            sl = b["p"] * 0.95
+            bamboo = f"https://app.investbamboo.com/stock/{clean_t}"
+            chaka = f"https://chaka.com/stocks/{clean_t}"
+            msg += f"{flag} {b['t']} ${b['p']:.2f} RSI {b['rsi']:.0f} Res {b['res']:+.2f}% Score {b['score']:.0f}% {strength}\n  👉 {b['reason']} | Vol {b['vr']:.1f}x vs SMA {b['vs']:.1f}%\n  🎯 TP ${tp:.2f} (+10%) | 🛑 SL ${sl:.2f} (-5%)\n  🛒 Bamboo: {bamboo}\n  📈 Chaka: {chaka}\n\n"
     else:
         msg += "🟢 No high-quality dislocation now — AI say WAIT. No fake trades.\n"
 
