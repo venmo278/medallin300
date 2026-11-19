@@ -1,5 +1,20 @@
 import yfinance as yf, pandas as pd, time, requests, os
+from threading import Thread
+from flask import Flask
 
+# --- Flask keep-alive for Render Free Web Service ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Medallion 300 is Live!"
+
+def run_web():
+    app.run(host='0.0.0.0', port=10000)
+
+Thread(target=run_web, daemon=True).start()
+
+# --- Telegram - use Render Env Variables, no hardcode ---
 TELEGRAM_TOKEN = os.getenv("8876434733:AAG2HGDf7_aYTvMMtYIPkyti_NuSwDG4U_A")
 TELEGRAM_CHAT_ID = os.getenv("7817556351")
 
